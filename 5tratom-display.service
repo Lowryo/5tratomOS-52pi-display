@@ -1,0 +1,15 @@
+[Unit]
+Description=5tratomOS 52Pi Display Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/5tratom-display/dashboard.py
+Restart=always
+RestartSec=5
+User=root
+WorkingDirectory=/opt/5tratom-display
+
+[Install]
+WantedBy=multi-user.target
