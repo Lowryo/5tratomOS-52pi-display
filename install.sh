@@ -3,35 +3,29 @@
 ###############################################################################
 # install.sh – Automated installer for 5tratomOS 52Pi display dashboard
 #
-# This script will:
-#   1. Update system package lists and install required system packages.
-#   2. Install Python packages required for the dashboard via pip.
-#   3. Copy the dashboard script and systemd service into appropriate locations.
-#   4. Enable I²C in /boot/config.txt (if not already enabled).
-#   5. Reload systemd, enable the service, and start it immediately.
+# Supports:
+#   A) One-liner install (curl | bash)  -> downloads required files from GitHub
+#   B) Local install (cloned repo)      -> uses local files
 #
-# Run this script on your Raspberry Pi (Debian/5tratomOS) to set up the display.
-# Usage:
-#   bash install.sh
-#
-# For a one‑liner installation directly from GitHub (after committing to your
-# repository), you can use:
+# One-liner:
 #   curl -fsSL https://raw.githubusercontent.com/Lowryo/5tratomOS-52pi-display/main/install.sh | bash
-#
 ###############################################################################
 
 set -euo pipefail
 
-echo "[5tratom-display] Starting installation..."
+APP_NAME="5tratom-display"
+TARGET_DIR="/opt/${APP_NAME}"
+SERVICE_NAME="5tratom-display.service"
 
-# Ensure the script is run from the repository root, where dashboard.py resides.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+# Your repo raw base (for one-liner installs)
+REPO_BASE="https://raw.githubusercontent.com/Lowryo/5tratomOS-52pi-display/main"
+
+echo "[${APP_NAME}] Starting installation..."
 
 ##########################################################################
 # Step 1: Install system packages
 ##########################################################################
-echo "[5tratom-display] Updating package lists and installing system dependencies..."
+echo "[${APP_NAME}] Updating package lists and installing system dependencies..."
 sudo apt-get update -y
 sudo apt-get install -y \
   python3 \
@@ -47,7 +41,7 @@ sudo apt-get install -y \
 ##########################################################################
 # Step 2: Install Python packages
 ##########################################################################
-echo "[5tratom-display] Installing Python packages via pip..."
+echo "[${APP_NAME}] Installing Python packages via pip..."
 sudo pip3 install --no-cache-dir --break-system-packages \
   luma.oled \
   Pillow \
@@ -55,19 +49,52 @@ sudo pip3 install --no-cache-dir --break-system-packages \
   netifaces
 
 ##########################################################################
-# Step 3: Copy files into place
+# Step 3: Put files into place
 ##########################################################################
-TARGET_DIR="/opt/5tratom-display"
-SERVICE_NAME="5tratom-display.service"
+echo "[${APP_NAME}] Creating target directory ${TARGET_DIR}..."
+sudo mkdir -p "${TARGET_DIR}"
 
-echo "[5tratom-display] Creating target directory $TARGET_DIR..."
-sudo mkdir -p "$TARGET_DIR"
+# Detect whether we have local files (cloned repo install)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "[5tratom-display] Copying dashboard.py to $TARGET_DIR..."
-sudo install -m 0755 "$SCRIPT_DIR/dashboard.py" "$TARGET_DIR/dashboard.py"
+have_local_dashboard=false
+have_local_service=false
 
-echo "[5tratom-display] Copying systemd service file..."
-sudo install -m 0644 "$SCRIPT_DIR/$SERVICE_NAME" "/etc/systemd/system/$SERVICE_NAME"
+if [[ -f "${SCRIPT_DIR}/dashboard.py" ]]; then
+  have_local_dashboard=true
+fi
+
+# Accept either correct name OR your current uploaded name
+if [[ -f "${SCRIPT_DIR}/${SERVICE_NAME}" ]]; then
+  have_local_service=true
+elif [[ -f "${SCRIPT_DIR}/Stratom-display.service" ]]; then
+  have_local_service=true
+  SERVICE_LOCAL_PATH="${SCRIPT_DIR}/Stratom-display.service"
+else
+  SERVICE_LOCAL_PATH="${SCRIPT_DIR}/${SERVICE_NAME}"
+fi
+
+# Install dashboard.py
+if [[ "${have_local_dashboard}" == "true" ]]; then
+  echo "[${APP_NAME}] Using local dashboard.py"
+  sudo install -m 0755 "${SCRIPT_DIR}/dashboard.py" "${TARGET_DIR}/dashboard.py"
+else
+  echo "[${APP_NAME}] Downloading dashboard.py from GitHub..."
+  sudo curl -fsSL "${REPO_BASE}/dashboard.py" -o "${TARGET_DIR}/dashboard.py"
+  sudo chmod +x "${TARGET_DIR}/dashboard.py"
+fi
+
+# Install service file
+if [[ -f "${SCRIPT_DIR}/${SERVICE_NAME}" ]]; then
+  echo "[${APP_NAME}] Using local ${SERVICE_NAME}"
+  sudo install -m 0644 "${SCRIPT_DIR}/${SERVICE_NAME}" "/etc/systemd/system/${SERVICE_NAME}"
+elif [[ -f "${SCRIPT_DIR}/Stratom-display.service" ]]; then
+  echo "[${APP_NAME}] Found Stratom-display.service in repo; installing as ${SERVICE_NAME}"
+  sudo install -m 0644 "${SCRIPT_DIR}/Stratom-display.service" "/etc/systemd/system/${SERVICE_NAME}"
+else
+  echo "[${APP_NAME}] Downloading ${SERVICE_NAME} from GitHub..."
+  sudo curl -fsSL "${REPO_BASE}/${SERVICE_NAME}" -o "/etc/systemd/system/${SERVICE_NAME}"
+fi
 
 ##########################################################################
 # Step 4: Enable I²C if necessary
@@ -75,19 +102,25 @@ sudo install -m 0644 "$SCRIPT_DIR/$SERVICE_NAME" "/etc/systemd/system/$SERVICE_N
 CONFIG="/boot/config.txt"
 PARAM="dtparam=i2c_arm=on"
 
-if ! grep -q "^$PARAM" "$CONFIG"; then
-  echo "[5tratom-display] Enabling I²C in $CONFIG..."
-  echo "$PARAM" | sudo tee -a "$CONFIG" >/dev/null
+if [[ -f "${CONFIG}" ]]; then
+  if ! grep -q "^${PARAM}$" "${CONFIG}"; then
+    echo "[${APP_NAME}] Enabling I²C in ${CONFIG}..."
+    echo "${PARAM}" | sudo tee -a "${CONFIG}" >/dev/null
+    echo "[${APP_NAME}] NOTE: If I²C was just enabled, you may need to reboot."
+  else
+    echo "[${APP_NAME}] I²C already enabled in ${CONFIG}. Skipping."
+  fi
 else
-  echo "[5tratom-display] I²C already enabled in $CONFIG. Skipping."
+  echo "[${APP_NAME}] WARNING: ${CONFIG} not found. If I²C isn't enabled, enable it manually."
 fi
 
 ##########################################################################
 # Step 5: Enable and start the service
 ##########################################################################
-echo "[5tratom-display] Reloading systemd daemon and enabling service..."
+echo "[${APP_NAME}] Reloading systemd daemon and enabling service..."
 sudo systemctl daemon-reload
-sudo systemctl enable "$SERVICE_NAME"
-sudo systemctl restart "$SERVICE_NAME"
+sudo systemctl enable "${SERVICE_NAME}"
+sudo systemctl restart "${SERVICE_NAME}"
 
-echo "[5tratom-display] Installation complete! The display should show system information shortly."
+echo "[${APP_NAME}] Installation complete!"
+echo "[${APP_NAME}] Check status with: sudo systemctl status ${SERVICE_NAME} --no-pager"
