@@ -17,7 +17,7 @@ APP_NAME="5tratom-display"
 TARGET_DIR="/opt/${APP_NAME}"
 SERVICE_NAME="5tratom-display.service"
 
-# Your repo raw base (for one-liner installs)
+# Repo raw base (for one-liner installs)
 REPO_BASE="https://raw.githubusercontent.com/Lowryo/5tratomOS-52pi-display/main"
 
 echo "[${APP_NAME}] Starting installation..."
@@ -57,25 +57,8 @@ sudo mkdir -p "${TARGET_DIR}"
 # Detect whether we have local files (cloned repo install)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-have_local_dashboard=false
-have_local_service=false
-
-if [[ -f "${SCRIPT_DIR}/dashboard.py" ]]; then
-  have_local_dashboard=true
-fi
-
-# Accept either correct name OR your current uploaded name
-if [[ -f "${SCRIPT_DIR}/${SERVICE_NAME}" ]]; then
-  have_local_service=true
-elif [[ -f "${SCRIPT_DIR}/Stratom-display.service" ]]; then
-  have_local_service=true
-  SERVICE_LOCAL_PATH="${SCRIPT_DIR}/Stratom-display.service"
-else
-  SERVICE_LOCAL_PATH="${SCRIPT_DIR}/${SERVICE_NAME}"
-fi
-
 # Install dashboard.py
-if [[ "${have_local_dashboard}" == "true" ]]; then
+if [[ -f "${SCRIPT_DIR}/dashboard.py" ]]; then
   echo "[${APP_NAME}] Using local dashboard.py"
   sudo install -m 0755 "${SCRIPT_DIR}/dashboard.py" "${TARGET_DIR}/dashboard.py"
 else
@@ -88,9 +71,6 @@ fi
 if [[ -f "${SCRIPT_DIR}/${SERVICE_NAME}" ]]; then
   echo "[${APP_NAME}] Using local ${SERVICE_NAME}"
   sudo install -m 0644 "${SCRIPT_DIR}/${SERVICE_NAME}" "/etc/systemd/system/${SERVICE_NAME}"
-elif [[ -f "${SCRIPT_DIR}/Stratom-display.service" ]]; then
-  echo "[${APP_NAME}] Found Stratom-display.service in repo; installing as ${SERVICE_NAME}"
-  sudo install -m 0644 "${SCRIPT_DIR}/Stratom-display.service" "/etc/systemd/system/${SERVICE_NAME}"
 else
   echo "[${APP_NAME}] Downloading ${SERVICE_NAME} from GitHub..."
   sudo curl -fsSL "${REPO_BASE}/${SERVICE_NAME}" -o "/etc/systemd/system/${SERVICE_NAME}"
@@ -101,12 +81,13 @@ fi
 ##########################################################################
 CONFIG="/boot/config.txt"
 PARAM="dtparam=i2c_arm=on"
+I2C_ENABLED_NOW=false
 
 if [[ -f "${CONFIG}" ]]; then
   if ! grep -q "^${PARAM}$" "${CONFIG}"; then
     echo "[${APP_NAME}] Enabling I²C in ${CONFIG}..."
     echo "${PARAM}" | sudo tee -a "${CONFIG}" >/dev/null
-    echo "[${APP_NAME}] NOTE: If I²C was just enabled, you may need to reboot."
+    I2C_ENABLED_NOW=true
   else
     echo "[${APP_NAME}] I²C already enabled in ${CONFIG}. Skipping."
   fi
@@ -124,3 +105,8 @@ sudo systemctl restart "${SERVICE_NAME}"
 
 echo "[${APP_NAME}] Installation complete!"
 echo "[${APP_NAME}] Check status with: sudo systemctl status ${SERVICE_NAME} --no-pager"
+
+if [[ "${I2C_ENABLED_NOW}" == "true" ]]; then
+  echo "[${APP_NAME}] I²C was just enabled. If the display does not respond, reboot now:"
+  echo "  sudo reboot"
+fi
